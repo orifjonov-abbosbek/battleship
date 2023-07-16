@@ -1,0 +1,22 @@
+{
+  "name": "ws_task",
+  "version": "1.0.0",
+  "description": "Battleship game backend using WebSocket",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node ./src/index.js",
+    "start:dev": "nodemon ./src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Your Name",
+  "keywords": [],
+  "license": "ISC",
+  "devDependencies": {
+    "nodemon": "^2.0.16"
+  },
+  "dependencies": {
+    "ws": "^8.8.0",
+    "dotenv": "^10.0.0"
+  }
+}
