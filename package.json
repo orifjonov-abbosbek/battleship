@@ -1,22 +1,22 @@
 {
-  "name": "ws_task",
-  "version": "1.0.0",
-  "description": "Template for the WebSocket remote control task",
-  "main": "index.js",
-  "scripts": {
-    "start": "node -r esm index.js",
-    "start:dev": "nodemon -r esm index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "author": "Orifjonov Abbosbek",
-  "keywords": [],
-  "license": "ISC",
-  "devDependencies": {
-    "esm": "^3.2.25",
-    "nodemon": "^2.0.16"
-  },
-  "dependencies": {
-    "ws": "^8.8.0"
-  },
-  "type": "module"
+    "name": "ws_task",
+    "version": "1.0.0",
+    "description": "Template for the WebSocket remote control task",
+    "main": "index.js",
+    "type": "module",
+    "scripts": {
+        "start": "node ./index.js",
+        "start:dev": "nodemon ./index.js",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "author": "Andrei Auchynnikau",
+    "keywords": [],
+    "license": "ISC",
+    "devDependencies": {
+        "nodemon": "^2.0.16"
+    },
+    "dependencies": {
+        "dotenv": "^16.3.1",
+        "ws": "^8.8.0"
+    }
 }
