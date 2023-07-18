@@ -1,193 +1,203 @@
-import {  WebSocketServer } from "ws";
+import {WebSocketServer} from "ws";
+import http from "http";
 
-const playersDB = [];
-const roomsDB = new Map();
+const players = [];
+const rooms = [];
 
-const webSocketServer = new WebSocketServer({ noServer: true });
+function addUser(ws, data, userId) {
+  const { indexRoom: roomId } = JSON.parse(data);
 
-function sendMessage(socket, message) {
-  socket.send(JSON.stringify(message));
-}
+  const room = findRoom(parseInt(roomId));
+  const player = findPlayer(userId);
 
-function sendPersonalResponse(client, result) {
-  const response = {
-    type: "personal_response",
-    result: result,
-  };
-  sendMessage(client, response);
-}
-
-function sendResponseForRoom(roomId, response) {
-  const room = roomsDB.get(roomId);
-  if (room) {
-    room.players.forEach((player) => {
-      sendMessage(player, response);
-    });
-  }
-}
-
-function sendResponseForAll(response) {
-  webSocketServer.clients.forEach((client) => {
-    sendMessage(client, response);
-  });
-}
-
-function handlePlayerRegistration(client, payload) {
-  const { name, password } = payload;
-  const player = playersDB.find((player) => player.name === name);
-  if (player) {
-    if (player.password === password) {
-      sendPersonalResponse(client, "success");
-    } else {
-      sendPersonalResponse(client, "failure");
-    }
-  } else {
-    playersDB.push({ name, password });
-    sendPersonalResponse(client, "success");
-  }
-}
-
-function handleCreateRoom(client) {
-  const roomId = Math.random().toString(36).substr(2, 9);
-  const roomUsers = [{ name: client.name }];
-  roomsDB.set(roomId, { roomUsers });
-  sendResponseForAll({
-    type: "update_room",
-    data: Array.from(roomsDB.values()),
-  });
-}
-
-function handleAddUserToRoom(client, payload) {
-  const { indexRoom } = payload;
-  const room = Array.from(roomsDB.values())[indexRoom];
-  if (room) {
-    room.roomUsers.push({ name: client.name });
-    sendResponseForAll({
-      type: "update_room",
-      data: Array.from(roomsDB.values()),
-    });
-    sendResponseForRoom(room.roomId, {
-      type: "create_game",
+  if (findPlayerInCurrentRoom(room, userId)) {
+    const response = {
+      type: "error",
       data: {
-        idGame: room.roomId,
-        idPlayer: room.roomUsers.length - 1,
+        error: true,
+        errorMessage: "user already in room",
       },
+      index: 0,
+    };
+
+    player?.wsObject.send(JSON.stringify(response));
+  } else {
+    room?.players.push(player);
+    updateRooms();
+    createGame(room);
+  }
+}
+
+function createGame(room) {
+  const { players, id: roomId } = room;
+
+  players.forEach(({ wsObject, playerId }) => {
+    const response = {
+      type: "create_game",
+      data: JSON.stringify({
+        idGame: roomId,
+        idPlayer: playerId,
+      }),
+      id: 0,
+    };
+    wsObject.send(JSON.stringify(response), (err) => err && console.log(err));
+  });
+}
+
+function createRoom(wsSended, data, userId) {
+  const generateId = new Date().valueOf() + rooms.length;
+  const user = findPlayer(userId);
+  const roomPlayer = findPlayerInRoom(userId);
+
+  // check for if user already create room
+  if (roomPlayer) {
+    const response = {
+      type: "error",
+      data: {
+        name: userId.toString(),
+        index: userId,
+        error: true,
+        errorText: "player already create room",
+      },
+      id: 0,
+    };
+    wsSended.send(JSON.stringify(response));
+  } else {
+    // add to rooms db new room
+    rooms.push({
+      id: generateId,
+      players: [user],
     });
   }
 }
 
-function handleAddShips(client, payload) {
-  const { gameId, ships, indexPlayer } = payload;
-  const room = roomsDB.get(gameId);
-  if (room) {
-    room.ships[indexPlayer] = ships;
-    if (Object.keys(room.ships).length === 2) {
-      room.currentPlayerIndex = 0;
-      sendResponseForRoom(gameId, {
-        type: "start_game",
-        data: { ships: room.ships, currentPlayerIndex: 0 },
-      });
-      sendResponseForRoom(gameId, {
-        type: "turn",
-        data: { currentPlayer: 0 },
-      });
-    }
-  }
-}
-
-function handleAttack(client, payload) {
-  const { gameId, x, y, indexPlayer } = payload;
-  const room = roomsDB.get(gameId);
-  if (room) {
-    if (indexPlayer === room.currentPlayerIndex) {
-      const opponentIndex = indexPlayer === 0 ? 1 : 0;
-      const opponentShips = room.ships[opponentIndex];
-      let result = "miss";
-      for (const ship of opponentShips) {
-        const position = ship.find((pos) => pos.x === x && pos.y === y);
-        if (position) {
-          ship.hits.push(position);
-          if (ship.hits.length === ship.length) {
-            result = "killed";
-            // Check if all opponent ships have been sunk
-            if (opponentShips.every((s) => s.hits.length === s.length)) {
-              sendResponseForRoom(gameId, {
-                type: "finish",
-                data: { winPlayer: indexPlayer },
-              });
-              return;
-            }
-          } else {
-            result = "shot";
-          }
-          break;
-        }
-      }
-      sendResponseForRoom(gameId, {
-        type: "attack",
-        data: {
-          position: { x, y },
-          currentPlayer: indexPlayer,
-          status: result,
-        },
-      });
-      if (result === "miss" || result === "killed") {
-        room.currentPlayerIndex = opponentIndex;
-      }
-      sendResponseForRoom(gameId, {
-        type: "turn",
-        data: { currentPlayer: room.currentPlayerIndex },
-      });
-    }
-  }
-}
-
-webSocketServer.on("connection", (client) => {
-  console.log("WebSocket client connected");
-
-  client.on("message", (message) => {
-    const parsedMessage = JSON.parse(message);
-    console.log("Received:", parsedMessage);
-
-    switch (parsedMessage.type) {
-      case "reg":
-        handlePlayerRegistration(client, parsedMessage.data);
-        break;
-      case "create_room":
-        handleCreateRoom(client);
-        break;
-      case "add_user_to_room":
-        handleAddUserToRoom(client, parsedMessage.data);
-        break;
-      case "add_ships":
-        handleAddShips(client, parsedMessage.data);
-        break;
-      case "attack":
-        handleAttack(client, parsedMessage.data);
-        break;
-      default:
-        console.log("Unknown message type:", parsedMessage.type);
-    }
+function webSocketServer(wsPort) {
+  const server = http.createServer();
+const wss = new WebSocketServer({ noServer: true });
+  server.listen(wsPort, () => {
+    console.log(`WS_Server started on port ${wsPort}`);
   });
 
-  client.on("close", () => {
-    console.log("WebSocket client disconnected");
-    roomsDB.forEach((room, roomId) => {
-      const index = room.roomUsers.findIndex(
-        (user) => user.name === client.name
-      );
-      if (index !== -1) {
-        room.roomUsers.splice(index, 1);
-        if (room.roomUsers.length === 0) {
-          roomsDB.delete(roomId);
-          sendResponseForAll({
-            type: "update_room",
-            data: Array.from(roomsDB.values()),
-          });
+  wss.on("connection", (ws) => {
+    const playerId = new Date().valueOf() + players.length;
+    console.log(`A client connected with id:${playerId}`);
+
+    ws.on("message", (message) => {
+      try {
+        const { type: messageType, data } = JSON.parse(message.toString());
+
+        switch (messageType) {
+          case "reg":
+            registerPlayer(ws, data, playerId);
+            updateRooms();
+            break;
+          case "create_room":
+            createRoom(ws, data, playerId);
+            updateRooms();
+            break;
+          case "add_user_to_room":
+            addUser(ws, data, playerId);
+            updateRooms();
+            break;
+          case "single_play":
+            console.log("Received message:", messageType);
+            console.log("Received message:", data);
+            break;
+          default:
+            console.log("Unknown request type");
+            ws.send("Unknown request type");
+            break;
         }
+      } catch (error) {
+        console.log("error has been caught " + error);
       }
     });
-  });
-});
 
+    ws.on("close", () => {
+      console.log("A client disconnected");
+    });
+  });
+
+  server.on("upgrade", (request, socket, head) => {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  });
+}
+
+function isPlayerExists(name) {
+  const filteredPlayers = players.filter((player) => player.name === name);
+  return filteredPlayers.length > 0;
+}
+
+function registerPlayer(ws, dataReceived, playerId) {
+  const parsedData = JSON.parse(dataReceived);
+  const { name, password } = parsedData;
+
+  if (!isPlayerExists(name)) {
+    const newPlayer = { playerId, name, password, wsObject: ws };
+    players.push(newPlayer);
+
+    const response = {
+      type: "reg",
+      data: JSON.stringify({
+        name,
+        id: playerId,
+        error: false,
+        errorText: "",
+      }),
+      id: 0,
+    };
+    ws.send(JSON.stringify(response));
+  } else {
+    const message = `player with name: ${name} already exists`;
+    const response = {
+      type: "reg",
+      data: {
+        name,
+        id: 0,
+        error: true,
+        errorText: message,
+      },
+      id: 0,
+    };
+    ws.send(JSON.stringify(response));
+  }
+}
+
+function updateRooms() {
+  players.forEach((player) => {
+    const data = rooms.map((room) => {
+      const roomId = room.id;
+      const roomUsers = room.players.map((player) => ({
+        index: player.playerId,
+        name: player.name,
+      }));
+      return { roomId, roomUsers };
+    });
+
+    const response = {
+      type: "update_room",
+      data: JSON.stringify(data),
+      id: 0,
+    };
+
+    player.wsObject.send(JSON.stringify(response));
+  });
+}
+const findPlayer = (userId) =>
+  players.find(({ playerId }) => playerId === userId);
+
+const findPlayerInRoom = (userId) => {
+  let result;
+  rooms.forEach(({ players }) => {
+    result = players.find(({ playerId }) => playerId === userId);
+  });
+  return result;
+};
+
+const findRoom = (roomId) => rooms.find(({ id }) => id === roomId);
+
+const findPlayerInCurrentRoom = (room, userId) =>
+  room?.players?.find((player) => player.playerId === userId);
 export { webSocketServer };
